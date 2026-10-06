@@ -75,3 +75,13 @@ def send_report_email(to: str, subject: str, body_text: str,
                        "**Senha de app** (não a senha normal da conta).")
     except Exception as e:  # noqa: BLE001
         return False, f"Erro SMTP: {e}"
+
+
+
+def send_report_email_safe(destino, assunto, corpo_html, anexos):
+    """Wrapper a prova de falhas: qualquer erro de SMTP vira (False, msg)
+    em vez de derrubar o app."""
+    try:
+        return send_report_email(destino, assunto, corpo_html, anexos)
+    except Exception as exc:  # noqa: BLE001
+        return False, f"Falha no envio do e-mail: {exc}"

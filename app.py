@@ -59,7 +59,7 @@ from utils.relatorio import (
     build_xlsx_workbook,
     parse_ocorrencias,
 )
-from utils.mailer import mailer_status, send_report_email
+from utils.mailer import mailer_status, send_report_email, send_report_email_safe
 
 
 # ---------------------------------------------------------------------------
@@ -416,6 +416,14 @@ with up_col1:
         key="txt_uploader",
         help="Arquivo `matrícula;nome;valor;obs` gerado pelo setor comercial.",
     )
+_empresa_opts = ["(detectar pelo nome do TXT)", "COMERCIAL", "MULTISSERVIÇOS", "VSP", "ATIVA"]
+_empresa_sel = st.selectbox("🏢 Empresa deste processamento (resultado sai separado por empresa)", _empresa_opts, key="empresa_proc_sel")
+_empresa_auto = _infer_empresa_txt(getattr(txt_file, "name", "") or "")
+_empresa_final = _empresa_auto if _empresa_sel.startswith("(detectar") else _empresa_sel
+st.session_state["empresa_txt_final"] = "" if _empresa_sel.startswith("(detectar") and not _empresa_auto else _empresa_final
+if _empresa_sel.startswith("(detectar") and not _empresa_auto:
+    st.caption("⚠️ Não detectei a empresa pelo nome do TXT — selecione acima para sair na empresa certa.")
+
 with up_col2:
     xls_file = st.file_uploader(
         "📊 Saldo GVBUS (PDF/XLSX/XLS/CSV)",
@@ -730,6 +738,12 @@ if conflicts:
                 st.session_state.confirmed_overrides = overrides
                 st.toast(f"{len(overrides)} vínculo(s) confirmado(s).", icon="✅")
                 st.rerun()
+
+if conflicts and st.button("⚡ Aplicar TODAS as sugestões e continuar", key="aplicar_todas_conf", use_container_width=True):
+    st.session_state.confirmed_overrides = {c.txt_index: c.correct_matricula for c in conflicts}
+    st.session_state.validated_pairs = {c.key: True for c in conflicts}
+    st.toast(f"{len(conflicts)} vínculo(s) aplicado(s) automaticamente.", icon="⚡")
+    st.rerun()
 else:
     st.success("🎉 Todas as matrículas do TXT já estão vinculadas ao AppLider — nenhuma correção necessária.")
 
@@ -740,7 +754,7 @@ else:
 
 sem_casos = find_sem_escala(
     txt_rows, applider_table.df,
-    empresa_txt=_empresa_final,
+    empresa_txt=st.session_state.get("empresa_txt_final", ""),
     applider_overrides=st.session_state.confirmed_overrides,
 )
 
@@ -865,13 +879,6 @@ if unresolved_now:
         "com o valor do TXT original e a marca `[SEM ESCALA]` na OBS."
     )
 
-_empresa_opts = ["(detectar pelo nome do TXT)", "COMERCIAL", "MULTISSERVIÇOS", "VSP", "ATIVA"]
-_empresa_sel = st.selectbox("🏢 Empresa deste processamento (o resultado sai separado por empresa)", _empresa_opts, key="empresa_proc_sel")
-_empresa_auto = _infer_empresa_txt(getattr(txt_file, "name", "") or "")
-_empresa_final = _empresa_auto if _empresa_sel.startswith("(detectar") else _empresa_sel
-if _empresa_sel.startswith("(detectar") and not _empresa_auto:
-    st.info("Não detectei a empresa pelo nome do TXT — selecione acima para o relatório sair na empresa certa.")
-
 # roda o compare
 result: ComparisonResult = compare(
     txt_rows, saldo_table.df, applider_table.df,
@@ -987,7 +994,7 @@ st.dataframe(esc_df_display, use_container_width=True, hide_index=True)
 # ---------------------------------------------------------------------------
 _div_rows = [r for r in result.rows if getattr(r, "empresa_divergente", False)]
 if _div_rows:
-    st.warning(f"⚠️ **{len(_div_rows)} colaborador(es) com empresa divergente** — este processamento é **{_empresa_final or chr(63)}** mas o AppLider indica outra empresa. Confira antes de concluir.")
+    st.warning(f"⚠️ **{len(_div_rows)} colaborador(es) com empresa divergente** — este processamento é **{st.session_state.get("empresa_txt_final", "") or "?"}** mas o AppLider indica outra empresa. Confira antes de concluir.")
     st.dataframe(pd.DataFrame([{"Matrícula": r.matricula, "Nome": r.nome, "Empresa no AppLider": r.empresa, "Empresa deste TXT": r.empresa_txt} for r in _div_rows]), width="stretch")
 
 # Tabela detalhada + filtros
@@ -1102,9 +1109,15 @@ if _oc is None:
 else:
     st.caption(f"🩺 Cruzando com **{len(_oc)} ocorrências** do período.")
 
-with st.spinner("Gerando relatório HTML + workbook XLSX…"):
-    html_report = build_html_report(result, _oc)
-    xlsx_bytes = build_xlsx_workbook(result, _oc)
+html_report, xlsx_bytes = None, None
+try:
+    with st.spinner("Gerando relatório HTML + workbook XLSX…"):
+        html_report = build_html_report(result, _oc)
+        xlsx_bytes = build_xlsx_workbook(result, _oc)
+except Exception as _rep_err:
+    st.error(f"⚠️ Relatório não gerou ({_rep_err}). Os resultados e o TXT acima continuam válidos — baixe o TXT normalmente.")
+if html_report is None or xlsx_bytes is None:
+    st.stop()
 
 rp1, rp2 = st.columns(2)
 with rp1:
@@ -1160,7 +1173,7 @@ else:
                 "Anexos: relatório executivo (HTML) e workbook mensal (XLSX).\n"
                 "-- GVBUS Comparator · Líder Limpe"
             )
-            ok, msg = send_report_email(dest, subject, body, [
+            ok, msg = send_report_email_safe(dest, subject, body, [
                 (f"relatorio_gvbus_{ts}.html", html_report.encode("utf-8"), "text/html"),
                 (f"acompanhamento_gvbus_{ts}.xlsx", xlsx_bytes,
                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
