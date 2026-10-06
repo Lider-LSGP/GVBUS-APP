@@ -764,7 +764,6 @@ else:
 
 sem_casos = find_sem_escala(
     txt_rows, applider_table.df,
-    empresa_txt=st.session_state.get("empresa_txt_final", ""),
     applider_overrides=st.session_state.confirmed_overrides,
 )
 
