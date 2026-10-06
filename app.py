@@ -1128,6 +1128,44 @@ except Exception as _rep_err:
 if html_report is None or xlsx_bytes is None:
     st.stop()
 
+# --- ENVIO AUTOMATICO: assim que o relatorio termina de gerar, dispara o e-mail ---
+_auto_key = f"auto_mail_sent_{ts}_{len(result.rows)}"
+mail_ok, mail_msg = mailer_status()
+if not mail_ok:
+    st.info(f"📧 Envio automático indisponível: {mail_msg}")
+elif st.session_state.get(_auto_key):
+    st.success("✅ Relatórios já enviados automaticamente para seu e-mail.")
+else:
+    with st.spinner("📧 Enviando relatórios por e-mail automaticamente…"):
+        _subject = (
+            f"GVBUS · Relatórios {st.session_state.get('empresa_txt_final','') or ''} · ciclo "
+            f"{st.session_state.periodo_inicio.strftime('%d/%m/%Y')} a "
+            f"{st.session_state.periodo_fim.strftime('%d/%m/%Y')}"
+        )
+        _body = (
+            "Relatórios gerados automaticamente pelo GVBUS Comparator.\n\n"
+            f"Empresa: {st.session_state.get('empresa_txt_final','') or '(não informada)'}\n"
+            f"Período: {st.session_state.periodo_inicio.strftime('%d/%m/%Y')} "
+            f"a {st.session_state.periodo_fim.strftime('%d/%m/%Y')}\n"
+            f"Colaboradores: {len(result.rows)}\n"
+            f"Total TXT: R$ {result.total_txt:,.2f}\n"
+            f"A depositar: R$ {result.total_depositar:,.2f}\n"
+            f"Economia: R$ {result.total_txt - result.total_depositar:,.2f}\n\n"
+            "Anexos: relatório executivo (HTML) e workbook mensal (XLSX).\n"
+            "-- GVBUS Comparator · Líder Limpe"
+        )
+        _ok, _msg = send_report_email_safe("liderlsgp@gmail.com", _subject, _body, [
+            (f"relatorio_gvbus_{ts}.html", html_report.encode("utf-8"), "text/html"),
+            (f"acompanhamento_gvbus_{ts}.xlsx", xlsx_bytes,
+             "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
+        ])
+    if _ok:
+        st.session_state[_auto_key] = True
+        st.success(f"✅ Relatórios enviados automaticamente para **liderlsgp@gmail.com**")
+        st.balloons()
+    else:
+        st.warning(f"⚠️ Envio automático falhou ({_msg}). Use o botão manual abaixo para reenviar.")
+
 rp1, rp2 = st.columns(2)
 with rp1:
     st.download_button(
@@ -1150,22 +1188,15 @@ with rp2:
              "abas Ocorrências/Intercorrências e Resumo com fórmulas.",
     )
 
-mail_ok, mail_msg = mailer_status()
-if not mail_ok:
-    st.info(
-        f"📧 **Envio automático desativado** ({mail_msg}). Para ligar: configure "
-        "a seção `[smtp]` nos secrets (modelo em `.streamlit/secrets.toml.example`). "
-        "Aí os relatórios saem por e-mail direto aqui do app."
-    )
-else:
+if mail_ok:
     with st.form("send_mail_form"):
-        st.markdown("**📧 Enviar relatórios por e-mail**")
+        st.markdown("**📧 Reenviar / enviar para outro e-mail**")
         dest = st.text_input(
             "Destinatário",
             value="liderlsgp@gmail.com",
             key="mail_to",
         )
-        if st.form_submit_button("📧 Enviar agora", use_container_width=True):
+        if st.form_submit_button("📧 Reenviar agora", use_container_width=True):
             subject = (
                 f"GVBUS · Relatórios do ciclo "
                 f"{st.session_state.periodo_inicio.strftime('%d/%m/%Y')} a "
@@ -1188,6 +1219,7 @@ else:
                  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"),
             ])
             if ok:
+                st.session_state[_auto_key] = True
                 st.success(f"✅ {msg}")
                 st.balloons()
             else:
