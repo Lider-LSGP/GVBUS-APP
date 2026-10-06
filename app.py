@@ -66,6 +66,16 @@ from utils.mailer import mailer_status, send_report_email, send_report_email_saf
 # Configuração da página
 # ---------------------------------------------------------------------------
 
+def _infer_empresa_txt(nome: str) -> str:
+    """Infere a empresa pelo nome do arquivo TXT enviado."""
+    n = (nome or "").upper()
+    if "MULTI" in n: return "MULTISSERVIÇOS"
+    if "VSP" in n: return "VSP"
+    if "ATIVA" in n: return "ATIVA"
+    if "COMERCIAL" in n: return "COMERCIAL"
+    return ""
+
+
 st.set_page_config(
     page_title="Líder Limpe — GVBUS Comparator",
     page_icon="🟧",
